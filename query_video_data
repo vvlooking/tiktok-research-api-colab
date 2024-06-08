@@ -1,0 +1,213 @@
+!pip install pandas requests
+import pandas as pd
+import requests
+import json
+import time
+
+"""
+GET PARAMETERS
+---
+(1) hashtag
+(2) start date
+(3) end date
+(4) output file (.json)
+(5) [optional] search id
+(6) [optional] cursor
+"""
+# Replace these lines with input prompts
+HASH_SEARCH = input("Enter the hashtag: ")
+START_DATE = input("Enter the start date (YYYYMMDD): ")
+END_DATE = input("Enter the end date (YYYYMMDD): ")
+DATA_FILE = input("Enter the output file path (e.g., /content/output.json): ")
+
+# Check if picking up from a past search
+past_search = input("Are you picking up from a past search? (y/n): ").lower()
+if past_search == 'y':
+    SEARCH_ID = input("Enter the search ID: ")
+    CURSOR = int(input("Enter the cursor value: "))
+else:
+    SEARCH_ID = None
+    CURSOR = None
+
+"""
+FUNCTION TO GET ACCESS TOKEN
+"""
+
+def get_access_token():
+    CLIENT_KEY = "YOUR_CLIENT_KEY"  # substitute with your client key
+    CLIENT_SECRET = "YOUR_CLIENT_SECRET"  # substitute with your secret key
+    r = requests.post('https://open.tiktokapis.com/v2/oauth/token/',
+                      headers={'Content-Type': 'application/x-www-form-urlencoded',
+                               'Cache-Control': 'no-cache'},
+                      data={'client_key': CLIENT_KEY,
+                            'client_secret': CLIENT_SECRET,
+                            'grant_type': 'client_credentials'})
+    ACCESS_TOKEN = r.json()['access_token']
+    return ACCESS_TOKEN
+
+"""
+START DATA COLLECTION
+"""
+
+T = time.process_time()  # get new access token every hour (good for 2 hours)
+
+ALL_FIELDS = 'id,video_description,create_time, region_code,share_count,view_count,like_count,\
+comment_count, music_id,hashtag_names, username,effect_ids,playlist_id,voice_to_text'
+
+ACCESS_TOKEN = get_access_token()
+
+"""
+QUERY VIDEOS WITH HASHTAGS PROVIDED IN ARGUMENT LIST
+"""
+
+QUERY = {
+    'and': [{
+        'operation': 'EQ',
+        'field_name': 'hashtag_name',
+        'field_values': [HASH_SEARCH]
+    }]
+}
+
+"""
+MAKE INITIAL QUERY
+"""
+
+if SEARCH_ID and CURSOR:  # picking up from a past search
+    D = requests.post('https://open.tiktokapis.com/v2/research/video/query/?fields=%s' % ALL_FIELDS,
+                      headers={'authorization': 'bearer ' + ACCESS_TOKEN},
+                      data={'query': json.dumps(QUERY),
+                            'start_date': START_DATE,
+                            'end_date': END_DATE,
+                            'max_count': 100,
+                            'cursor': CURSOR,
+                            'search_id': SEARCH_ID}
+                      )
+else:  # not picking up from a past search
+    D = requests.post('https://open.tiktokapis.com/v2/research/video/query/?fields=%s' % ALL_FIELDS,
+                      headers={'authorization': 'bearer ' + ACCESS_TOKEN},
+                      data={'query': json.dumps(QUERY),
+                            'start_date': START_DATE,
+                            'end_date': END_DATE,
+                            'max_count': 100}
+                      )
+
+response_json = D.json()
+# Print the entire JSON response for debugging
+print("Initial response JSON:", response_json)
+
+# Check if 'data' is in the response
+if 'data' in response_json:
+    DATA_LIST = [response_json]
+else:
+    print("Key 'data' not found in the initial response.")
+    print("Full response:", response_json)
+    raise KeyError("'data' not found in the initial response.")
+
+"""
+MAKE UP TO A TOTAL OF 1000 REQUESTS
+(stop if/when there's no more data)
+"""
+
+i = 0
+while i < 999:
+    # update access token every hour
+    ELAPSED = time.process_time() - T
+    ELAPSED_HOURS = time.gmtime(ELAPSED).tm_hour
+    if ELAPSED_HOURS > 0:
+        ACCESS_TOKEN = get_access_token()
+        T = time.process_time()
+
+    try:
+        D = requests.post('https://open.tiktokapis.com/v2/research/video/query/?fields=%s' % ALL_FIELDS,
+                          headers={'authorization': 'bearer ' + ACCESS_TOKEN},
+                          data={'query': json.dumps(QUERY),
+                                'start_date': START_DATE,
+                                'end_date': END_DATE,
+                                'max_count': 100}
+                          )
+
+        response_json = D.json()
+        DATA_LIST.append(response_json)
+
+        i += 1
+
+        # Check for 'has_more' key in response
+        if 'data' in response_json and 'has_more' in response_json['data']:
+            if not response_json['data']['has_more']:
+                break
+        else:
+            print("Key 'has_more' not found in the response data.")
+            break
+
+    except Exception as e:
+        print("Error during request:", str(e))
+        i += 1
+        continue
+
+"""
+WRITE DATA TO JSON FILE
+"""
+
+with open(DATA_FILE, 'w') as f:
+    json.dump(DATA_LIST, f, indent=2)
+
+"""
+CLEAN THE JSON DATA BEFORE CONVERTING TO CSV
+"""
+# Create TikTok URL from username and video id
+def create_tiktok_url(username, video_id):
+    # Ensure there's no leading single quote in the video_id
+    video_id = video_id.replace("'", "")
+    return f"https://www.tiktok.com/@{username}/video/{video_id}"
+
+df = pd.DataFrame(DATA_LIST)
+print("DataFrame columns:", df.columns)
+
+# Initialize videos_df as an empty DataFrame
+videos_df = pd.DataFrame()
+
+# Check if 'data' is a valid column and print the first entry
+if 'data' in df.columns:
+    print("First entry in 'data':", df['data'].iloc[0])
+
+    # Attempt to normalize data
+    try:
+        nested_data = pd.json_normalize(df['data'].iloc[0])  # Adjust based on actual data structure
+        print("Nested data columns:", nested_data.columns)
+
+        # Check if 'id' is in the columns, then convert to string
+        if 'id' in nested_data.columns:
+            nested_data['id'] = nested_data['id'].astype(str)
+        else:
+            print("No 'id' column found in nested data.")
+
+        # Process videos if 'videos' column exists
+        if 'videos' in nested_data.columns:
+            videos_list = nested_data.explode('videos')['videos'].dropna().tolist()
+            videos_df = pd.json_normalize(videos_list)
+
+            # Append a single quote to each ID to ensure it is treated as text
+            videos_df['id'] = "'" + videos_df['id'].astype(str)
+        else:
+            print("No 'videos' column found in nested data.")
+
+            # Convert IDs to strings here to ensure they are not interpreted as numbers
+            videos_df['id'] = videos_df['id'].astype(str)
+    except Exception as e:
+        print("Error normalizing data:", str(e))
+
+# Ensure all IDs are treated as strings
+if not videos_df.empty:
+    videos_df['id'] = videos_df['id'].astype(str)
+if 'username' in videos_df.columns and 'id' in videos_df.columns:
+    videos_df['url'] = videos_df.apply(lambda x: create_tiktok_url(x['username'], x['id']), axis=1)
+else:
+    print("Username or ID column missing from DataFrame")
+
+# Verify data types
+print(videos_df.dtypes)
+
+# Save to CSV
+csv_file_path = f"{DATA_FILE.rsplit('.', 1)[0]}.csv"
+videos_df.to_csv(csv_file_path, index=False, quoting=1)
+print(f"CSV file '{csv_file_path}' has been created.")
