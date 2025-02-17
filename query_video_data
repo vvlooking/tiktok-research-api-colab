@@ -35,7 +35,7 @@ FUNCTION TO GET ACCESS TOKEN
 
 def get_access_token():
     CLIENT_KEY = "YOUR_CLIENT_KEY"  # substitute with your client key
-    CLIENT_SECRET = "YOUR_CLIENT_SECRET"  # substitute with your secret key
+    CLIENT_SECRET = "YOUR_SECRET_KEY"  # substitute with your secret key
     r = requests.post('https://open.tiktokapis.com/v2/oauth/token/',
                       headers={'Content-Type': 'application/x-www-form-urlencoded',
                                'Cache-Control': 'no-cache'},
