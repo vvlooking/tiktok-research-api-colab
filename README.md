@@ -8,3 +8,10 @@ Script: query_video_data
 This script queries all videos with a given hashtag in a specified timeframe and writes the data to a CSV file. The data includes all fields offered by TikTok: creation date, username, region code, video ID, hashtags, video description, music ID, like count, comment count, share count, view count, effect ID, and video length. Please refer to TikTok's Research API documentation on [querying videos](https://developers.tiktok.com/doc/research-api-specs-query-videos/) for more information.
 
 To run the script, insert your CLIENT KEY and CLIENT SECRET in the get_access_token function on Lines 37 and 38, respectively.
+
+## Query Profile Data
+Script: query_profile_data
+
+This script queries all profile data associated with a list of videos and writes the data to a CSV file. The data includes all fields offered by TikTok: display name, bio description, avatar URL, verified status, follower count, following count, likes count, and video count.
+
+To run the script, insert your CLIENT KEY and CLIENT SECRET in the get_access_token function on Lines 19 and 20, respectively.
